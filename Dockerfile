@@ -1,4 +1,5 @@
-FROM golang:1.19-alpine
+# FROM golang:1.19-alpine
+FROM golang:1.19-alpine3.18
 
 RUN apk add curl
 
