@@ -2,10 +2,8 @@ package main
 
 import (
 	"fmt"
-	// Uncomment this block to pass the first stage!
 	"os"
 	"os/exec"
-	// "log"
 )
 
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
@@ -19,7 +17,9 @@ func main() {
 
 	err := cmd.Run()
 	if err != nil {
-		fmt.Printf("Err: %v", err)
-		os.Exit(1)
+		fmt.Printf("Err: %v\n", err)
+		if exitError, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitError.ExitCode())
+		}
 	}
 }
