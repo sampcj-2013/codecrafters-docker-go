@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/sys/unix"
-	"kernel.org/pub/linux/libs/security/libcap/cap"
+	// "kernel.org/pub/linux/libs/security/libcap/cap"
 	"os"
 	"os/exec"
 	"syscall"
@@ -38,10 +38,10 @@ func main() {
 		// NOTE: If we are already running in a containerised environment we may not have the
 		//	 capabalities available to us to create a true character device file.
 		//       In that case we should do a check for capabilities here, otherwise...
-		if len(debugCapabilities) > 0 {
-			caps := cap.GetProc()
-			fmt.Printf("Available capabalities on this system: %q\n", caps)
-		}
+		// if len(debugCapabilities) > 0 {
+		// 	caps := cap.GetProc()
+		// 	fmt.Printf("Available capabalities on this system: %q\n", caps)
+		// }
 
 		// if err := createCharacterfile("/tmp/mynull"); err != nil {
 		// 	fmt.Printf("Error: %s\n", err)
