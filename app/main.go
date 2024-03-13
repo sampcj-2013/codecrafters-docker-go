@@ -58,9 +58,9 @@ func main() {
 	cmd.Stdout = os.Stdout
 
 	// fmt.Printf("Available capabilities: %q\n", syscall.SysProcAttr{})
-	// cmd.SysProcAttr = &syscall.SysProcAttr{
-	// 	Cloneflags: syscall.CLONE_NEWUTS,
-	// }
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags: syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID,
+	}
 
 	chdir, err := ioutil.TempDir("/tmp/", "container.")
 	if err != nil {
@@ -139,7 +139,6 @@ func mknod(path string, mode uint32, dev int) error {
 }
 
 func copyFile(sourcePath, currentPath, destinationPath, fileToCopy string) error {
-
 	file, err := os.Open(sourcePath)
 	if err != nil {
 		return err
