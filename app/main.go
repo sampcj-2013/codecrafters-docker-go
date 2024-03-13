@@ -63,7 +63,7 @@ func main() {
 	if err != nil {
 		fmt.Println("Could not create temporary directory: %s", err)
 	}
-	defer os.RemoveAll(dir)
+	defer os.RemoveAll(chdir)
 
 	err = setup_chroot(chdir)
 	if err != nil {
