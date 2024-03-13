@@ -1,4 +1,6 @@
+//go:build !internalsamdebug
 // +build !internalsamdebug
+
 package main
 
 import (
@@ -6,10 +8,11 @@ import (
 	"fmt"
 	"golang.org/x/sys/unix"
 	// "kernel.org/pub/linux/libs/security/libcap/cap"
+	"io/ioutil"
+	"io"
 	"os"
 	"os/exec"
 	"syscall"
-	"io/ioutil"
 )
 
 // NOTE: Helpful debugging build flags for checking system capaabilities on host
@@ -64,6 +67,11 @@ func main() {
 		fmt.Println("Could not create temporary directory: %s", err)
 	}
 	defer os.RemoveAll(chdir)
+
+	err = copyFile("./docker-explorer", chdir, "/usr/local/bin/", "docker-explorer")
+	if err != nil {
+		fmt.Printf("Error copying file: %s\n", err)
+	}
 
 	err = setup_chroot(chdir)
 	if err != nil {
@@ -122,11 +130,63 @@ func mknod(path string, mode uint32, dev int) error {
 	return unix.Mknod(path, mode, dev)
 }
 
+func copyFile(sourcePath, currentPath, destinationPath, fileToCopy string) error {
+
+	file, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+
+
+	fs, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	permissions := fs.Mode().Perm()
+
+	newFilePath := fmt.Sprintf("%s%s", currentPath, destinationPath)
+	if len(debugCapabilities) > 0 {
+		fmt.Printf("Copying to new file: %s\n", newFilePath)
+	}
+
+	err = os.MkdirAll(newFilePath, 0750)
+	if err != nil {
+		return err
+	}
+
+	destinationFile, err := os.Create(fmt.Sprintf("%s%s", newFilePath, fileToCopy))
+	if err != nil {
+		return err
+	}
+
+	if err = destinationFile.Chmod(permissions); err != nil {
+		return err
+	}
+
+	buf := make([]byte, fs.Size()+1)
+
+	defer destinationFile.Close()
+	defer file.Close()
+
+	for {
+		n, err := file.Read(buf)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if n == 0 {
+			return nil
+		}
+
+		if _, err := destinationFile.Write(buf[:n]); err != nil {
+			return err
+		}
+	}
+}
+
 func setup_chroot(path string) error {
 	if len(debugCapabilities) > 0 {
 		fmt.Printf("Temporary directory for chroot: %s\n", path)
 	}
-
 	err := syscall.Chroot(path)
 	if err != nil {
 		msg := fmt.Sprintf("Could not set chroot: %s\n", err)
