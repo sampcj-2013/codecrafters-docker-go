@@ -68,7 +68,15 @@ func main() {
 	}
 	defer os.RemoveAll(chdir)
 
-	err = copyFile("./docker-explorer", chdir, "/usr/local/bin/", "docker-explorer")
+
+	if len(debugCapabilities) > 0 {
+		err = copyFile("./docker-explorer", chdir, "/usr/local/bin/", "docker-explorer")
+		if err != nil {
+			fmt.Printf("Error copying file: %s\n", err)
+		}
+	}
+
+	err = copyFile("/usr/local/bin/docker-explorer", chdir, "/usr/local/bin/", "docker-explorer")
 	if err != nil {
 		fmt.Printf("Error copying file: %s\n", err)
 	}
