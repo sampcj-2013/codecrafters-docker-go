@@ -1,3 +1,4 @@
 .podman/*
+.experiments/*
 main
 docker-explorer
