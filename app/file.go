@@ -134,9 +134,14 @@ func untar(dst string, r io.Reader) error {
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if _, err := os.Stat(target); err != nil {
-				if err := os.MkdirAll(target, 0600); err != nil {
+				if err := os.MkdirAll(target, 0755); err != nil {
 					return err
 				}
+			}
+		case tar.TypeSymlink:
+			os.Symlink(header.Linkname, filepath.Join(dst,header.Name))
+			if err != nil {
+				return err
 			}
 		case tar.TypeReg:
 			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
