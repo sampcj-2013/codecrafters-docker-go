@@ -65,7 +65,8 @@ type (
 	}
 	ImageLayer struct {
 		Manifest
-		Data bytes.Buffer
+		Sha256Sum string
+		Data      bytes.Buffer
 	}
 	ContainerRegistryDetails struct {
 		FQDN         string
@@ -104,8 +105,8 @@ type (
 )
 
 const (
-	DefaultRegistry string = "docker.io"
-	ImageLayersPath string = "/tmp/containers/layers"
+	DefaultRegistry        string             = "docker.io"
+	ImageLayersPath        string             = "/tmp/containers/layers"
 	OCIImageTypeManifestV1 OCIImageManifestV1 = "application/vnd.oci.image.manifest.v1+json"
 	// Docker Image Manifest Version 2, Schema 2
 	DockerImageTypeDistributionManifestV2     RegistrySchema = "application/vnd.docker.distribution.manifest.v2+json"
@@ -120,10 +121,11 @@ const (
 
 // RegistryCache is a map of string containing sha256:digest values pointing to ImageLayer values
 var registryCache RegistryCache
+
 // docker.io is the default registry
 var Registries = ContainerRegistries{
-	"docker.io": &ContainerRegistryDetails{
-		Alias:        "docker.io",
+	DefaultRegistry: &ContainerRegistryDetails{
+		Alias:        DefaultRegistry,
 		Auth:         "auth.docker.io",
 		FQDN:         "registry-1.docker.io",
 		ManifestPath: "/v2/%s/manifests/%s",
@@ -150,7 +152,7 @@ var defaultHTTPClient *http.Client
 
 func init() {
 	if defaultHTTPClient = createHTTPClient(); defaultHTTPClient == nil {
-		fmt.Println("Unable to create a default HTTP client, exiting...")
+		fmt.Println("unable to create a default HTTP client, exiting...")
 		os.Exit(1)
 	}
 }
@@ -158,7 +160,7 @@ func init() {
 // TODO: Move to net.go
 func createHTTPClient() *http.Client {
 	return &http.Client{
-		Timeout: time.Second * 10,
+		Timeout: time.Second * 20,
 		Transport: &http.Transport{
 			// TLSClientConfig: &tls.Config{
 			// 	InsecureSkipVerify: true,
@@ -172,17 +174,17 @@ func createHTTPClient() *http.Client {
 	}
 }
 
-func pullImage(imageReference string, auth *Auth) error {
+func pullImage(imageReference string, auth *Auth) (*[]ImageLayer, error) {
 	trueImageReference, registry, tag := sanitiseImageReference(imageReference)
 	registryDetails, ok := Registries[registry]
 	if !ok {
-		return errors.New("Unable to find appropriate registry for the image provided")
+		return nil, errors.New("unable to find appropriate registry for the image provided")
 	}
 
 	query := registryDetails.generateManifestRequest(trueImageReference, tag)
 	req, err := http.NewRequest("GET", query, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if auth != nil {
@@ -191,7 +193,7 @@ func pullImage(imageReference string, auth *Auth) error {
 	req.Header.Set("Accept", AcceptHeaders)
 	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	defer resp.Body.Close()
@@ -201,7 +203,7 @@ func pullImage(imageReference string, auth *Auth) error {
 		auth, err = registryDetails.requestAuthenticationToken(resp)
 		req, err := http.NewRequest("GET", query, nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", auth.Token))
 		req.Header.Set("Accept", AcceptHeaders)
@@ -209,7 +211,7 @@ func pullImage(imageReference string, auth *Auth) error {
 	}
 
 	if err != nil {
-		return err
+		return nil, err
 	} else if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
 	}
@@ -217,7 +219,7 @@ func pullImage(imageReference string, auth *Auth) error {
 	body, err := io.ReadAll(resp.Body)
 	contentType, ok := resp.Header["Content-Type"]
 	if !ok || len(contentType) != 1 {
-		return errors.New("Unsupported Content-Type returned from registry")
+		return nil, errors.New("unsupported Content-Type returned from registry")
 	}
 
 	var (
@@ -230,14 +232,14 @@ func pullImage(imageReference string, auth *Auth) error {
 	case OciImageIndexV1:
 		manifest, err = manifests.getDigestForSystem(body)
 	default:
-		return errors.New("Unsupported Content-Type returned from registry")
+		return nil, errors.New("unsupported Content-Type returned from registry")
 	}
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	var layers []ImageLayer
+	var layers *[]ImageLayer
 
 	switch manifest.MediaType {
 	case string(DockerImageTypeDistributionManifestV2):
@@ -245,7 +247,7 @@ func pullImage(imageReference string, auth *Auth) error {
 		query = registryDetails.generateManifestRequest(trueImageReference, manifest.Digest)
 		resp, err := registryDetails.sendRequest(query, "GET", auth)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		defer resp.Body.Close()
@@ -254,22 +256,21 @@ func pullImage(imageReference string, auth *Auth) error {
 		var dockerManifest = DockerDistributionManifest{}
 		err = json.Unmarshal(body, &dockerManifest)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		if manifest.Platform.Os != runtime.GOOS && manifest.Platform.Architecture != runtime.GOARCH {
-			return errors.New("no matching manifest for this system architecture found")
+			return nil, errors.New("no matching manifest for this system architecture found")
 		}
-		layers = dockerManifest.Layers
+		layers = &dockerManifest.Layers
 	case string(OCIImageTypeManifestV1):
 		// For this resource we need to first retrieve the image manifest hash
 		// Then we can retrieve the image layer as with the returned docker image manifest
 		// https://registry-1.docker.io/v2/library/ubuntu/manifests/sha256:aa772...
 		// TODO: Implement handling for retrieving OCIv1 image manifests
-		_ = "NotImplemented"
+		return nil, errors.New("not implemented")
 	default:
-		fmt.Printf("Registry schema type: %+v\n", manifest.MediaType)
-		return errors.New("Unsupported Content-Type returnend from registry")
+		return nil, errors.New(fmt.Sprintf("unsupported Content-Type: %s returnend from registry", manifest.MediaType))
 	}
 
 	var registryRequest = &RegistryRequest{
@@ -284,12 +285,14 @@ func pullImage(imageReference string, auth *Auth) error {
 		err = registryDetails.fetchLayers(layers, registryRequest)
 		if err != nil {
 			continue
+		} else {
+			break
 		}
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return err
+	return layers, err
 }
 
 func (registry *ContainerRegistryDetails) sendRequest(query string, method string, auth *Auth) (*http.Response, error) {
@@ -318,7 +321,7 @@ func (registry RegistryCache) hasLayer(layer *ImageLayer) error {
 	// Let's try checking whether the layer on the VFS is correct,
 	// meaning that its checksum matches the provided digest.
 	if !ok {
-		fileLayer, err := os.Open(fmt.Sprintf("%s/%s.tar.gz", ImageLayersPath, layer.Digest))
+		fileLayer, err := os.Open(fmt.Sprintf("%s/%s.tar.gz", ImageLayersPath, layer.Sha256Sum))
 		if err != nil {
 			return err
 		}
@@ -336,21 +339,37 @@ func (registry RegistryCache) hasLayer(layer *ImageLayer) error {
 	return nil
 }
 
+func (l *ImageLayer) UnmarshalJSON(data []byte) error {
+	type I ImageLayer
+
+	if err := json.Unmarshal(data, (*I)(l)); err != nil {
+		return err
+	}
+
+	checksum := strings.SplitAfterN(l.Digest, "sha256:", 2)
+	if len(checksum) != 2 {
+		return errors.New("unexpected format for digest")
+	}
+	// TODO: Require more robust checking of the checksum
+	l.Sha256Sum = checksum[1]
+	return nil
+}
+
 // TODO: Setup a permanent image layer caching structure.
 // TODO: Setup up an expiring context with retry logic to allow for some error resiliency when pulling layers concurrently
-func (registry *ContainerRegistryDetails) fetchLayers(layers []ImageLayer, registryRequest *RegistryRequest) error {
+func (registry *ContainerRegistryDetails) fetchLayers(layers *[]ImageLayer, registryRequest *RegistryRequest) error {
 	var (
 		wg           sync.WaitGroup
 		successCount atomic.Int32
 	)
 
-	for _, layer := range layers {
+	for _, layer := range *layers {
 		wg.Add(1)
-		go func(l *ImageLayer, w *sync.WaitGroup, s *atomic.Int32) {
+		go func(l *ImageLayer, w *sync.WaitGroup) {
 			defer w.Done()
 			// Do we have the layer already in our cache?
-			if err := registryCache.hasLayer(l); err != nil {
-				s.Add(1)
+			if err := registryCache.hasLayer(l); err == nil {
+				successCount.Add(1)
 				return
 			}
 
@@ -368,14 +387,14 @@ func (registry *ContainerRegistryDetails) fetchLayers(layers []ImageLayer, regis
 			if err != nil {
 				return
 			}
-
-			s.Add(1)
-		}(&layer, &wg, &successCount)
+			successCount.Add(1)
+			return
+		}(&layer, &wg)
 	}
 	wg.Wait()
 
-	if int(successCount.Load()) < len(layers) {
-		return errors.New("Unable to fetch all layers in image")
+	if int(successCount.Load()) != len(*layers) {
+		return errors.New("unable to fetch all layers in image")
 	}
 	return nil
 }
@@ -398,18 +417,12 @@ const cacheEnabled = false
 
 func copyTo(reader io.ReadCloser, l *ImageLayer) error {
 	r := bufio.NewReader(reader)
-
-	checksum := strings.SplitAfterN(l.Digest, "sha256:", 2)
-	if len(checksum) != 2 {
-		return errors.New("incorrect format for digest")
-	}
-
 	err := os.MkdirAll(ImageLayersPath, 0600)
 	if err != nil {
 		return errors.New("could not create directory for this image")
 	}
 
-	f, err := os.OpenFile(fmt.Sprintf("%s/%s.tar.gz", ImageLayersPath, checksum[1]), os.O_WRONLY|os.O_CREATE, 0600)
+	f, err := os.OpenFile(fmt.Sprintf("%s/%s.tar.gz", ImageLayersPath, l.Sha256Sum), os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return errors.New("could not open image file for writing")
 	}
@@ -423,9 +436,11 @@ func copyTo(reader io.ReadCloser, l *ImageLayer) error {
 		wCache := bufio.NewWriter(&l.Data)
 		writers = append(writers, wCache)
 	}
+	defer wFile.Flush()
 
 	mw := io.MultiWriter(writers...)
 	bytesWritten, err := io.Copy(mw, r)
+
 	if err != nil {
 		return err
 	}
@@ -448,17 +463,17 @@ func (manifests *RegistryResponse) getDigestForSystem(body []byte) (*Manifest, e
 			return &manifest, err
 		}
 	}
-	return nil, errors.New("No digest found that supports this architecture or system")
+	return nil, errors.New("no digest found that supports this architecture or system")
 }
 
 func (registry *ContainerRegistryDetails) requestAuthenticationToken(response *http.Response) (*Auth, error) {
 	if wwwAuth, ok := response.Header["Www-Authenticate"]; !ok {
-		return nil, errors.New("No Www-Authenticate header present; cannot perform authentication")
+		return nil, errors.New("no Www-Authenticate header present; cannot perform authentication")
 	} else {
 		auth := &Auth{}
 		err := bearerRegex.MatchToTarget(wwwAuth[0], auth)
 		if err != nil {
-			return nil, errors.New("Malformed Www-Authenticate header present; cannot perform authentication")
+			return nil, errors.New("malformed Www-Authenticate header present; cannot perform authentication")
 		}
 
 		err = registry.constructAuth(auth)
@@ -518,10 +533,4 @@ func sanitiseImageReference(ref string) (string, string, string) {
 		tag = "latest"
 	}
 	return ref, registryDomain, tag
-}
-
-func extractLayer() {
-}
-
-func extractLayersToChroot() {
 }

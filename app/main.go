@@ -33,8 +33,9 @@ func main() {
 	command := os.Args[3]
 	args := os.Args[4:len(os.Args)]
 
-	// Pull the image down
-	if err := pullImage(ref, nil); err != nil {
+	// Pull the image down first before switching chroot
+	layers, err := pullImage(ref, nil)
+	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
@@ -92,6 +93,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// TODO: Get file and then untar
+	for _, layer := range *layers {
+		layerPath := fmt.Sprintf("%s/%s", ImageLayersPath, layer.Sha256Sum)
+		f, err := os.OpenFile(fmt.Sprintf("%s.tar.gz", layerPath), os.O_RDONLY, 0600)
+		if err != nil {
+			fmt.Printf("could not open layer %s - %s\n", layer.Sha256Sum, err)
+			os.Exit(1)
+		}
+		err = untar(chdir, f)
+		if err != nil {
+			fmt.Printf("could not extract layer %s - %s\n", layer.Sha256Sum, err)
+			os.Exit(1)
+		}
+	}
+
 	err = setup_chroot(chdir)
 	if err != nil {
 		fmt.Println(err)
@@ -101,19 +117,19 @@ func main() {
 	if len(debugCapabilities) > 0 {
 		pwd, err := cwd()
 		if err != nil {
-			fmt.Printf("Error getting current working directory:\n", err)
+			fmt.Printf("error getting current working directory:\n", err)
 		}
-		fmt.Printf("Current working directory: %s\n", pwd)
+		fmt.Printf("current working directory: %s\n", pwd)
 
 		err = lwd()
 		if err != nil {
-			fmt.Printf("Error getting working directory listing:\n", err)
+			fmt.Printf("error getting working directory listing:\n", err)
 		}
 	}
 
 	err = cmd.Run()
 	if err != nil {
-		fmt.Printf("Err: %v\n", err)
+		fmt.Printf("error executing command: %v\n", err)
 		if exitError, ok := err.(*exec.ExitError); ok {
 			os.Exit(exitError.ExitCode())
 		}
