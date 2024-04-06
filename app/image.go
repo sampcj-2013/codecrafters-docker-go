@@ -332,7 +332,7 @@ func (registry RegistryCache) hasLayer(layer *ImageLayer) error {
 			return err
 		}
 
-		if string(hash.Sum(nil)) != layer.Digest {
+		if fmt.Sprintf("%x", hash.Sum(nil)) != layer.Sha256Sum {
 			return errors.New("digest mismatch for existing layer and the remote")
 		}
 	}
